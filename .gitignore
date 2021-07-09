@@ -1,0 +1,2 @@
+buildroot/sdcard.img
+buildroot/config_raspberrypi4/overlay/root/.ssh/authorized_keys
