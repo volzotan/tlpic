@@ -2,7 +2,7 @@
 
 DIR="bollogg:/home/volzotan/buildroot_extree_tlpic/external_tree/"
 
-rsync -av config_raspberrypi4/ $DIR --delete --exclude=".DS_Store"
+rsync -av config_tlpic/ $DIR --delete --exclude=".DS_Store"
 
 rsync -av ../tlc $DIR"overlay/home/pi"              \
     --delete                                        \
