@@ -1,0 +1,29 @@
+#!/bin/sh
+
+#
+# Start the TLP service....
+#
+
+cd /home/pi/tlp
+
+case "$1" in
+  start)
+    printf "Starting TLP: "
+    python3 tlp.py & 
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+    ;;
+  stop)
+    printf "Stopping TLP: "
+    # TODO...
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+
+exit $?
