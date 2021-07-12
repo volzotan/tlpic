@@ -1,6 +1,6 @@
 #!/bin/sh
 
-DIR="bollogg:/home/volzotan/buildroot_extree_tlp/buildroot"
+DIR="bollogg:/home/volzotan/buildroot_extree_tlpic/buildroot"
 
 # rsync -av $DIR/configs/raspberrypi0w_defconfig .
 # rsync -av $DIR/configs/raspberrypi0_defconfig .

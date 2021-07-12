@@ -1,6 +1,6 @@
 #!/bin/sh
 
-DIR="bollogg:/home/volzotan/buildroot_extree_tlp/external_tree/"
+DIR="bollogg:/home/volzotan/buildroot_extree_tlpic/external_tree/"
 
 rsync -av config_tlp/ $DIR --delete --exclude=".DS_Store"
 
