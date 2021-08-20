@@ -1,0 +1,29 @@
+#!/bin/sh
+
+#
+# Start the SLP service....
+#
+
+cd /home/pi/slp
+
+case "$1" in
+  start)
+    printf "Starting SLP: "
+    python3 slp.py & 
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+    ;;
+  stop)
+    printf "Stopping SLP: "
+    # TODO...
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+
+exit $?
