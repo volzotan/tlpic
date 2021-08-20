@@ -29,6 +29,11 @@ echo "\n---"
 echo "setting current time and date on the pi"
 sh set_date.sh
 
+echo "\n---"
+echo "uploading device tree files"
+rsync -av ../devicetree/CM4_dt_blob $HOSTNAME:/home/pi/
+ssh $HOSTNAME "dtc -I dts -O dtb -o /boot/dt-blob.bin /home/pi/CM4_dt_blob/dt-blob-disp0-double_cam.dts"
+
 # upload script takes care of RW-remount
 echo "\n---"
 echo "uploading tlp program files"
