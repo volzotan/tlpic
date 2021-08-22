@@ -12,6 +12,8 @@ import traceback
 import RPi.GPIO as GPIO
 import picamera
 
+from pyzbar.pyzbar import decode, ZBarSymbol
+
 from devices import CompressorCameraController
 
 # import numpy as np
@@ -26,6 +28,9 @@ IMAGE_FORMAT            = "jpeg"
 CAPTURE_RAW             = False
 SENSOR_MODE             = 0
 EXPOSURE_COMPENSATION   = 0
+
+SCAN_QR_CODES           = True
+QR_CODE_PREFIX          = "TLP::"
 
 # all units in seconds
 RECORDING_TIME_MAX      = 10
@@ -50,9 +55,9 @@ MODE_REC    = 30
 
 CAMERA_SETTINGS = {
     "HQ": [
-        {"resolution": [640, 480]},     # preview
-        {"resolution": [4056, 3040]},   # still 
-        {"resolution": [1920, 1080]}    # video
+        {"resolution": [640, 480]},     # 0 : preview
+        {"resolution": [4056, 3040]},   # 1 : still 
+        {"resolution": [1920, 1080]}    # 2 : video
     ],
     "V2": [
         {"resolution": [640, 480]},
@@ -118,6 +123,7 @@ class Cam(object):
         self.mode               = MODE_IDLE
         self.camera_type        = None
         self.camera             = None
+        self.active_filter      = None
         self.timer_start        = None
         self.last_interaction   = datetime.datetime.now()
 
@@ -176,11 +182,33 @@ class Cam(object):
     def trigger(self):
 
         self.change_camera_settings(1)
-
         filename = self.get_filename(IMAGE_FORMAT)
-        self.camera.capture(os.path.join(*filename), format=IMAGE_FORMAT, bayer=CAPTURE_RAW)
+
+        # capture to file
+        # self.camera.capture(os.path.join(*filename), format=IMAGE_FORMAT, bayer=CAPTURE_RAW)
+
+        # capture to numpy datastructure
+        res = CAMERA_SETTINGS[self.camera_type][1]["resolution"]
+        img = np.empty((res[0], res[1], 3), dtype=np.uint8)
+        camera.capture(img, 'rgb')
+
+        # scan for QR codes always on the out-of-camera image
+        if SCAN_QR_CODES:
+            qrcode = decode(img, symbols=[ZBarSymbol.QRCODE])
+
+            try:
+                filter_type = self.configure_filter(qrcode.data)
+            except Exception as e:
+                self.log.debug("filter not applied")
+                # TODO: show message on display
+
+        if self.filter_type is not None:
+            self.apply_filter(img)
+
+        # TODO: write to file
+
         log.info("TRIGGER: {}".format(filename[1]))
-        
+
         self.change_camera_settings(0)
 
 
@@ -209,6 +237,26 @@ class Cam(object):
         self.change_camera_settings(0)
 
         self.convert_last_video_to_gif()
+
+
+    def configure_filter(self, payload):
+
+        if not payload.startswith(QR_CODE_PREFIX):
+            self.log.warning("incompatible QR code recognized. Payload: {}".format(str))
+            raise Exception("incompatible QR")
+
+        if payload == QR_CODE_PREFIX+"RESET":
+            self.filter_type = None
+            return None
+        if payload == QR_CODE_PREFIX+"BOOMERANG":
+            self.filter_type = "BOOMERANG"
+            return "BOOMERANG"
+        else:
+            self.log.warning("compatible but unknown QR code recognized. Payload: {}".format(str))
+            raise
+
+    def apply_filter(self, img):
+        pass
 
 
     def convert_last_video_to_gif(self):
