@@ -15,6 +15,7 @@ import picamera
 from pyzbar.pyzbar import decode, ZBarSymbol
 
 from devices import CompressorCameraController
+from filters import Filter
 
 # import numpy as np
 
@@ -70,6 +71,9 @@ CAMERA_SETTINGS = {
         {"resolution": [1296, 972]}
     ]
 }
+
+FILTER_BOOMERANG    = "BOOMERANG"
+FILTER_FOCAL_SWITCH = "FOCAL_SWITCH"
 
 
 def global_except_hook(exctype, value, tb):
@@ -199,13 +203,13 @@ class Cam(object):
             try:
                 filter_type = self.configure_filter(qrcode.data)
             except Exception as e:
-                self.log.debug("filter not applied")
+                log.debug("filter not applied")
                 # TODO: show message on display
 
-        if self.filter_type is not None:
-            self.apply_filter(img)
+        self.save_image(filename, img)
 
         # TODO: write to file
+        cv2.imwrite(filename, img)
 
         log.info("TRIGGER: {}".format(filename[1]))
 
@@ -242,21 +246,29 @@ class Cam(object):
     def configure_filter(self, payload):
 
         if not payload.startswith(QR_CODE_PREFIX):
-            self.log.warning("incompatible QR code recognized. Payload: {}".format(str))
+            log.warning("incompatible QR code recognized. Payload: {}".format(str))
             raise Exception("incompatible QR")
 
         if payload == QR_CODE_PREFIX+"RESET":
             self.filter_type = None
             return None
-        if payload == QR_CODE_PREFIX+"BOOMERANG":
-            self.filter_type = "BOOMERANG"
-            return "BOOMERANG"
+        if payload == QR_CODE_PREFIX+FILTER_BOOMERANG:
+            self.filter_type = FILTER_BOOMERANG
+            return FILTER_BOOMERANG
         else:
-            self.log.warning("compatible but unknown QR code recognized. Payload: {}".format(str))
+            log.warning("compatible but unknown QR code recognized. Payload: {}".format(str))
             raise
 
-    def apply_filter(self, img):
-        pass
+
+    def save_image(self, filename, img):
+        
+        if self.filter_type is None:
+            cv2.imwrite(os.path.join(*filename), img)
+            log.debug("write image [filter: None] to: {}".format(filename[-1]))
+        if self.filter_type == FILTER_BOOMERANG:
+            filters.apply_boomerang(img)
+        else:
+            log.error("undefined filter type: {}".format(self.filter_type))
 
 
     def convert_last_video_to_gif(self):
