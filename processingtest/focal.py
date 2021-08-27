@@ -6,11 +6,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 NUM_INTERPOLATIONS  = 20-2
-EXTENSIONS          = ["gif"]
+EXTENSIONS          = ["mp4"]
 BOOMERANG           = True
 
 IMAGES              = ["focal_2.jpg", "focal_1.jpg"]
-# IMAGES              = ["focal_4.jpg", "focal_3.jpg"]
+IMAGES              = ["focal_4.jpg", "focal_3.jpg"]
 TMP_DIR             = "tmp"
 
 MIN_MATCH_COUNT = 6
@@ -36,14 +36,6 @@ img2_bw = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
 # Initiate ORB detector
 # orb = cv2.ORB_create(nfeatures=1000) #scoreType=cv2.ORB_FAST_SCORE)
-
-
-# kp1, des1 = orb.detectAndCompute(img1,None)
-# img1_kp = cv2.drawKeypoints(img1, kp1, None, color=(0,255,0), flags=0)
-# plt.imshow(img1_kp), plt.show()
-# exit()
-
-
 # kp1, des1 = orb.detectAndCompute(img1_bw,None)
 # kp2, des2 = orb.detectAndCompute(img2_bw,None)
 
@@ -51,7 +43,7 @@ surf = cv2.xfeatures2d.SURF_create(400)
 kp1, des1 = surf.detectAndCompute(img1_bw,None)
 kp2, des2 = surf.detectAndCompute(img2_bw,None)
 
-print("found keypoints {} | {}".format(len(kp1), len(kp2)))
+print("found keypoints: {} | {}".format(len(kp1), len(kp2)))
 
 # FLANN_INDEX_LSH = 6
 # index_params= dict(algorithm = FLANN_INDEX_LSH,
@@ -64,7 +56,6 @@ print("found keypoints {} | {}".format(len(kp1), len(kp2)))
 FLANN_INDEX_KDTREE = 1
 index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
 search_params = dict(checks=50)   # or pass empty dictionary
-
 
 flann = cv2.FlannBasedMatcher(index_params, search_params)
 matches = flann.knnMatch(des1,des2,k=2)
@@ -87,21 +78,20 @@ if len(good) < MIN_MATCH_COUNT:
     matchesMask = None
     exit()
 
-
 src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
 dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
 
-M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
-# matchesMask = mask.ravel().tolist()
+M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+
+# TODO: check if images are correctly ordered.
+# img1 needs to have the higher focal length (more zoomed in)
 
 h,w,d = img1.shape
 pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
 dst = cv2.perspectiveTransform(pts,M)
 
+# draw outlines of warped image
 # img2 = cv2.polylines(img2,[np.int32(dst)],True,255,3, cv2.LINE_AA)
-
-
-
 
 # avg_x1 =  (dst[0][0][0] + dst[1][0][0])/2
 # avg_x2 =  (dst[2][0][0] + dst[3][0][0])/2
@@ -162,7 +152,7 @@ for i in range(0, num_total_images):
 
 for extension in EXTENSIONS:
 
-    cmd = ["ffmpeg", "-i", os.path.join(TMP_DIR, "focal_%d.jpg"), PARAMS[extension], "-y", "{}.{}".format("focal", extension)]
+    cmd = ["ffmpeg", "-i", os.path.join(TMP_DIR, "focal_%d.jpg"), PARAMS[extension], "-y", "{}.{}".format("focal2", extension)]
 
     cmdstr = ""
     for item in cmd:
