@@ -12,10 +12,10 @@ import traceback
 import RPi.GPIO as GPIO
 import picamera
 
-from pyzbar.pyzbar import decode, ZBarSymbol
+# from pyzbar.pyzbar import decode, ZBarSymbol
 
-from devices import CompressorCameraController
-from filters import Filter
+# from devices import CompressorCameraController
+import filters
 
 # import numpy as np
 
@@ -27,7 +27,7 @@ SERIAL_PORT             = "/dev/ttyAMA0"
 
 IMAGE_FORMAT            = "jpeg"
 CAPTURE_RAW             = False
-SENSOR_MODE             = 0
+SENSOR_MODE             = 0 #3 #0
 EXPOSURE_COMPENSATION   = 0
 
 SCAN_QR_CODES           = True
@@ -125,40 +125,58 @@ class Cam(object):
             pass
 
         self.mode               = MODE_IDLE
-        self.camera_type        = None
-        self.camera             = None
+        self.camera_type        = []
+        self.camera             = [None, None]
         self.active_filter      = None
         self.timer_start        = None
         self.last_interaction   = datetime.datetime.now()
+        self.controller         = None
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(BUTTON_SHUTTER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        self.camera = picamera.PiCamera(sensor_mode=SENSOR_MODE) 
+        kwargs = [
+            {},
+            {"led_pin": 30}
+        ]
 
-        self.camera.meter_mode = "average"
-        self.camera.exposure_compensation = EXPOSURE_COMPENSATION
-        # camera.iso = 400
-
-        for key in CAMERA_SETTINGS.keys():
+        for i in range(0, 2):
             try:
-                for setting in CAMERA_SETTINGS[key][0]:
+                self.camera[i] = (picamera.PiCamera(sensor_mode=SENSOR_MODE, camera_num=i, **kwargs[i]))
+                self.camera[i].exif_tags["IFD0.Make"] = "TLP"
+                self.camera[i].exif_tags["IFD0.Model"] += "_TLP_{}".format(i)
+            except Exception as e:
+                log.debug("init camera {} failed: {}".format(i, e))
 
-                    # set to STILL settings to check if it fails
-                    setattr(self.camera, setting, CAMERA_SETTINGS[key][1][setting])
+        for i in range(0, len(self.camera)):
+            cam = self.camera[i]
+            
+            if cam is None:
+                continue
 
-                    # set to PREVIEW settings if the correct model is known
-                    setattr(self.camera, setting, CAMERA_SETTINGS[key][0][setting])
+            cam.meter_mode = "average"
+            cam.exposure_compensation = EXPOSURE_COMPENSATION
+                # camera.iso = 400
 
-                log.debug("camera settings applied: {}".format(key))
-                self.camera_type = key
-                break
-            except picamera.exc.PiCameraValueError as e:
-                log.debug("failing setting camera resolution for {}, attempting fallback".format(key))
+            for key in CAMERA_SETTINGS.keys():
+                try:
+                    # set to STILL resolution to check if it fails
+                    cam.resolution = CAMERA_SETTINGS[key][1]["resolution"]
 
-        self.camera.start_preview()
+                    # set all settings to PREVIEW settings if the correct model is known
+                    for setting in CAMERA_SETTINGS[key][0]:
+                        setattr(cam, setting, CAMERA_SETTINGS[key][0][setting])
 
-        log.info("camera ready")
+                    log.debug("cam {} | camera settings applied: {}".format(i, key))
+                    self.camera_type.append(key)
+                    break
+                except picamera.exc.PiCameraValueError as e:
+                    print(e)
+                    log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(i, key))
+
+        self.camera[0].start_preview()
+
+        log.info("camera(s) ready")
 
         try:
             self.controller = CompressorCameraController.find_by_portname(SERIAL_PORT)
@@ -171,14 +189,14 @@ class Cam(object):
             log.error("no controller found: {}".format(e))
 
 
-    def change_camera_settings(self, mode):
+    def change_camera_settings(self, num_cam, mode):
 
         #self.camera.stop_preview()
 
-        settings = CAMERA_SETTINGS[self.camera_type][mode]
+        settings = CAMERA_SETTINGS[self.camera_type[num_cam]][mode]
 
         for key in settings:
-            setattr(self.camera, key, settings[key])
+            setattr(self.camera[num_cam], key, settings[key])
 
         #self.camera.start_preview()
 
@@ -371,9 +389,13 @@ class Cam(object):
 
         log.info("CLOSE")
 
-        if self.camera is not None:
-            self.camera.stop_preview()
-            self.camera.close()
+        for cam in self.camera:
+
+            if cam is None:
+                continue
+
+            cam.stop_preview()
+            cam.close()
 
 
 if __name__ == "__main__":
