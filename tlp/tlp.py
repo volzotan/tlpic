@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math
 import time
 import datetime
 import os
@@ -9,17 +10,26 @@ from fractions import Fraction
 import logging
 import traceback
 
+from concurrent.futures import ThreadPoolExecutor
+
 import RPi.GPIO as GPIO
 import picamera
+import numpy as np
+import cv2
 
 # from pyzbar.pyzbar import decode, ZBarSymbol
 
-# from devices import CompressorCameraController
+from devices import CompressorCameraController
 import filters
 
-# import numpy as np
+# revA/B | BCM numbering
+PIN_BUTTON_SHUTTER      = 22 
+PIN_BUTTON_FOCUS        = 27
+PIN_BUTTON_CAM0         = 17 
+PIN_BUTTON_CAM1         =  4
+PIN_LED1                =  6
+PIN_LED2                = 13
 
-BUTTON_SHUTTER          = 23 # BCM numbering
 OUTPUT_DIR              = "/media/storage"
 OUTPUT_DIR_TMP          = "/home/pi/tmp"
 
@@ -30,17 +40,20 @@ CAPTURE_RAW             = False
 SENSOR_MODE             = 0 #3 #0
 EXPOSURE_COMPENSATION   = 0
 
-SCAN_QR_CODES           = True
+SCAN_QR_CODES           = False
 QR_CODE_PREFIX          = "TLP::"
 
 # all units in seconds
 RECORDING_TIME_MAX      = 10
-MOUNTING_TIME_MAX       = 10
-IDLE_TIME_MAX           = 60
+IDLE_TIME_MAX           = 120 
+TRIGGER_TIMEOUT         = 10
 
 # consts
 MODE_IDLE   = 0
 MODE_REC    = 30
+
+# FOR DEBUG:
+IDLE_TIME_MAX           = 600
 
 # camera settings: PREVIEW / STILL / VIDEO
 
@@ -72,14 +85,18 @@ CAMERA_SETTINGS = {
     ]
 }
 
+MODE_PREVIEW    = 0
+MODE_STILL      = 1
+MODE_VIDEO      = 2
+
 FILTER_BOOMERANG    = "BOOMERANG"
 FILTER_FOCAL_SWITCH = "FOCAL_SWITCH"
 
 
 def global_except_hook(exctype, value, tb):
     
-    if cam is not None:
-        cam.close()
+    if tlcam is not None:
+        tlcam.close()
 
     log = logging.getLogger()
 
@@ -100,22 +117,78 @@ def global_except_hook(exctype, value, tb):
     # sys.__excepthook__(exctype, value, traceback)
 
 
-def check_for_mount():
+def _change_camera_settings(cam, mode):
 
-    pass
+    #self.camera.stop_preview()
+
+    for key in CAMERA_SETTINGS.keys():
+        try:
+            # set to STILL resolution to check if it fails
+            cam.resolution = CAMERA_SETTINGS[key][MODE_STILL]["resolution"]
+
+            # set all settings to correct settings if the correct model is known
+            for setting in CAMERA_SETTINGS[key][mode]:
+                setattr(cam, setting, CAMERA_SETTINGS[key][mode][setting])
+
+            log.debug("cam {} | camera settings applied: {}".format(cam, key))
+            
+            return key
+        except picamera.exc.PiCameraValueError as e:
+            print(e)
+            log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(cam, key))
+
+    #self.camera.start_preview()
 
 
-def mount():
+def _trigger(cam, filename):
 
-    pass
+    camera_type = _change_camera_settings(cam, MODE_STILL)
+
+    # capture to file
+    # self.camera.capture(os.path.join(*filename), format=IMAGE_FORMAT, bayer=CAPTURE_RAW)
+
+    # capture to numpy datastructure
+    res = CAMERA_SETTINGS[camera_type][MODE_STILL]["resolution"]
+
+    # beware, from the picamera docs:
+    # It is also important to note that when outputting to unencoded formats, the camera rounds the 
+    # requested resolution. The horizontal resolution is rounded up to the nearest multiple of 32 pixels, 
+    # while the vertical resolution is rounded up to the nearest multiple of 16 pixels. For example, 
+    # if the requested resolution is 100x100, the capture will actually contain 128x112 pixels worth of data, 
+    # but pixels beyond 100x100 will be uninitialized.
+    
+    res_rounded = [res[0], res[1]]
+    res_rounded[0] = math.ceil(res_rounded[0] / 32)*32 
+    res_rounded[1] = math.ceil(res_rounded[1] / 16)*16 
+
+    img = np.empty((res_rounded[0], res_rounded[1], 3), dtype=np.uint8)
+    cam.capture(img, 'rgb')
+
+    # cut off padding from rounding
+    img = img.reshape([res_rounded[0], res_rounded[1], 3])
+    img = img[:res[0], :res[1], :]
+
+    # scan for QR codes always on the out-of-camera image
+    if SCAN_QR_CODES:
+        qrcode = decode(img, symbols=[ZBarSymbol.QRCODE])
+
+        try:
+            filter_type = self.configure_filter(qrcode.data)
+        except Exception as e:
+            log.debug("filter not applied")
+            # TODO: show message on display
+
+    # self.save_image(filename, img)
+
+    # TODO: write to file
+    cv2.imwrite(filename, img)
+
+    log.info("TRIGGER: {}".format(filename[1]))
+
+    change_camera_settings(cam, MODE_PREVIEW)
 
 
-def unmount():
-
-    pass
-
-
-class Cam(object):
+class TLCam(object):
 
     def __init__(self):
 
@@ -132,8 +205,9 @@ class Cam(object):
         self.last_interaction   = datetime.datetime.now()
         self.controller         = None
 
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(BUTTON_SHUTTER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self.pool = ThreadPoolExecutor(3)
+
+        self.init_pins()
 
         kwargs = [
             {},
@@ -148,31 +222,15 @@ class Cam(object):
             except Exception as e:
                 log.debug("init camera {} failed: {}".format(i, e))
 
-        for i in range(0, len(self.camera)):
-            cam = self.camera[i]
-            
+        for cam in self.camera:
             if cam is None:
                 continue
-
+            
             cam.meter_mode = "average"
             cam.exposure_compensation = EXPOSURE_COMPENSATION
-                # camera.iso = 400
+            # camera.iso = 400
 
-            for key in CAMERA_SETTINGS.keys():
-                try:
-                    # set to STILL resolution to check if it fails
-                    cam.resolution = CAMERA_SETTINGS[key][1]["resolution"]
-
-                    # set all settings to PREVIEW settings if the correct model is known
-                    for setting in CAMERA_SETTINGS[key][0]:
-                        setattr(cam, setting, CAMERA_SETTINGS[key][0][setting])
-
-                    log.debug("cam {} | camera settings applied: {}".format(i, key))
-                    self.camera_type.append(key)
-                    break
-                except picamera.exc.PiCameraValueError as e:
-                    print(e)
-                    log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(i, key))
+            _change_camera_settings(cam, MODE_PREVIEW)
 
         self.camera[0].start_preview()
 
@@ -189,49 +247,40 @@ class Cam(object):
             log.error("no controller found: {}".format(e))
 
 
-    def change_camera_settings(self, num_cam, mode):
+    def init_pins(self):
 
-        #self.camera.stop_preview()
+        GPIO.setmode(GPIO.BCM)
+        
+        GPIO.setup(PIN_BUTTON_SHUTTER,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(PIN_BUTTON_FOCUS,    GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(PIN_BUTTON_CAM0,     GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(PIN_BUTTON_CAM1,     GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        settings = CAMERA_SETTINGS[self.camera_type[num_cam]][mode]
-
-        for key in settings:
-            setattr(self.camera[num_cam], key, settings[key])
-
-        #self.camera.start_preview()
+        GPIO.setup(PIN_LED1,            GPIO.OUT)
+        GPIO.setup(PIN_LED2,            GPIO.OUT)
 
 
     def trigger(self):
 
-        self.change_camera_settings(1)
+        future_triggers = []
         filename = self.get_filename(IMAGE_FORMAT)
 
-        # capture to file
-        # self.camera.capture(os.path.join(*filename), format=IMAGE_FORMAT, bayer=CAPTURE_RAW)
+        for i in range(0, len(self.camera)):
+            cam = self.camera[i]
+            if cam is None:
+                continue
 
-        # capture to numpy datastructure
-        res = CAMERA_SETTINGS[self.camera_type][1]["resolution"]
-        img = np.empty((res[0], res[1], 3), dtype=np.uint8)
-        camera.capture(img, 'rgb')
+            filename_split = os.path.splitext(filename[1])
+            filename[1] = "{}_{}{}".format(filename_split[0], i, filename_split[1])
 
-        # scan for QR codes always on the out-of-camera image
-        if SCAN_QR_CODES:
-            qrcode = decode(img, symbols=[ZBarSymbol.QRCODE])
+            future_triggers.append(self.pool.submit(_trigger, cam, filename))
 
-            try:
-                filter_type = self.configure_filter(qrcode.data)
-            except Exception as e:
-                log.debug("filter not applied")
-                # TODO: show message on display
+        # wait till all trigger threads are done
 
-        self.save_image(filename, img)
+        for f in future_triggers:
+            image_filename = f.result(timeout=TRIGGER_TIMEOUT)
 
-        # TODO: write to file
-        cv2.imwrite(filename, img)
-
-        log.info("TRIGGER: {}".format(filename[1]))
-
-        self.change_camera_settings(0)
+        log.debug("trigger done")
 
 
     def start_recording(self):
@@ -298,28 +347,28 @@ class Cam(object):
 
         if self.mode == MODE_IDLE:
 
-            if GPIO.input(BUTTON_SHUTTER) == 0:
+            time.sleep(1.0)
+            self.trigger()
+            exit()
+
+            if GPIO.input(PIN_BUTTON_SHUTTER) == 0:
                 time.sleep(0.5)
 
                 self.last_interaction = datetime.datetime.now()
 
                 # single press: photo
-                if GPIO.input(BUTTON_SHUTTER) == 1:
+                if GPIO.input(PIN_BUTTON_SHUTTER) == 1:
                     self.trigger()
                 
                 # long press: video
-                if GPIO.input(BUTTON_SHUTTER) == 0:
+                if GPIO.input(PIN_BUTTON_SHUTTER) == 0:
                     self.start_recording()
-
-            if (datetime.datetime.now() - self.last_interaction).total_seconds() > MOUNTING_TIME_MAX:
-                unmount()
 
             if (datetime.datetime.now() - self.last_interaction).total_seconds() > IDLE_TIME_MAX:
                     
                 if self.controller is not None:
                     try:
                         self.controller.shutdown(delay=15000)
-
                     except Exception as e:
                         log.error("poweroff failed: {}".format(e))
                 else:
@@ -343,7 +392,7 @@ class Cam(object):
                 self.stop_recording()
                 self.mode = MODE_IDLE
 
-            if GPIO.input(BUTTON_SHUTTER) == 1:
+            if GPIO.input(PIN_BUTTON_SHUTTER) == 1:
                 self.stop_recording()
                 self.mode = MODE_IDLE
 
@@ -380,7 +429,7 @@ class Cam(object):
                     break
 
             if not duplicate_found:
-                return (OUTPUT_DIR, filename_base + extensions[0])
+                return [OUTPUT_DIR, filename_base + extensions[0]]
 
         raise Exception("no filenames left!")
 
@@ -397,10 +446,12 @@ class Cam(object):
             cam.stop_preview()
             cam.close()
 
+        GPIO.cleanup()
+
 
 if __name__ == "__main__":
 
-    global cam
+    global tlcam
 
     print("init")
 
@@ -433,8 +484,8 @@ if __name__ == "__main__":
 
     # subprocess.run("mount -t tmpfs -o size=100m tmpfs {}".format(OUTPUT_DIR_TMP), shell=True, check=True)
 
-    cam = None
-    cam = Cam()
+    tlcam = None
+    tlcam = TLCam()
     
     while True:
-        cam.loop()
+        tlcam.loop()
