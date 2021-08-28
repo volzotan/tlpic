@@ -1,5 +1,6 @@
 #!/bin/sh
 
+export READTHEDOCS=True # required to install picamera
 pip3 install -r /home/pi/tlp/requirements.txt
 
 # add quiet to the cmdline.txt

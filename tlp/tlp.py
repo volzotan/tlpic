@@ -161,11 +161,11 @@ def _trigger(cam, filename):
     res_rounded[0] = math.ceil(res_rounded[0] / 32)*32 
     res_rounded[1] = math.ceil(res_rounded[1] / 16)*16 
 
-    img = np.empty((res_rounded[0], res_rounded[1], 3), dtype=np.uint8)
-    cam.capture(img, 'rgb')
+    img = np.empty((res_rounded[1] * res_rounded[0] * 3), dtype=np.uint8)
+    cam.capture(img, "bgr") #"rgb")
 
     # cut off padding from rounding
-    img = img.reshape([res_rounded[0], res_rounded[1], 3])
+    img = img.reshape([res_rounded[1], res_rounded[0], 3])
     img = img[:res[0], :res[1], :]
 
     # scan for QR codes always on the out-of-camera image
@@ -181,11 +181,11 @@ def _trigger(cam, filename):
     # self.save_image(filename, img)
 
     # TODO: write to file
-    cv2.imwrite(filename, img)
+    cv2.imwrite(os.path.join(*filename), img)
 
     log.info("TRIGGER: {}".format(filename[1]))
 
-    change_camera_settings(cam, MODE_PREVIEW)
+    _change_camera_settings(cam, MODE_PREVIEW)
 
 
 class TLCam(object):
@@ -271,9 +271,9 @@ class TLCam(object):
                 continue
 
             filename_split = os.path.splitext(filename[1])
-            filename[1] = "{}_{}{}".format(filename_split[0], i, filename_split[1])
+            filename_new = [filename[0], "{}_{}{}".format(filename_split[0], i, filename_split[1])]
 
-            future_triggers.append(self.pool.submit(_trigger, cam, filename))
+            future_triggers.append(self.pool.submit(_trigger, cam, filename_new))
 
         # wait till all trigger threads are done
 
@@ -423,7 +423,13 @@ class TLCam(object):
             duplicate_found = False
 
             for extension in extensions:
+
                 filename = filename_base + extension
+                if os.path.exists(os.path.join(OUTPUT_DIR, filename)):
+                    duplicate_found = True
+                    break
+
+                filename = filename_base + "_0" + extension
                 if os.path.exists(os.path.join(OUTPUT_DIR, filename)):
                     duplicate_found = True
                     break

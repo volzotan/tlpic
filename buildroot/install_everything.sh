@@ -48,7 +48,6 @@ sh upload_program_files.sh
 
 echo "\n---"
 echo "download pip packages"
-ssh $HOSTNAME 'export READTHEDOCS=True' # required to install picamera
 ssh $HOSTNAME 'sh /home/pi/tlp/buildroot_install.sh'
 
 echo "DONE! reboot..."
