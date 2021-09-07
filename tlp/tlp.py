@@ -42,6 +42,7 @@ EXPOSURE_COMPENSATION   = 0
 
 SCAN_QR_CODES           = False
 QR_CODE_PREFIX          = "TLP::"
+DEFAULT_ACTIVE_FILTER   = filters.FILTER_BOOMERANG
 
 # all units in seconds
 RECORDING_TIME_MAX      = 10
@@ -68,17 +69,17 @@ IDLE_TIME_MAX           = 600
 # 3     : 0.005-10fps       : HQ
 
 CAMERA_SETTINGS = {
-    "HQ": [
+    "IMX477": [
         {"resolution": [640, 480]},     # 0 : preview
         {"resolution": [4056, 3040]},   # 1 : still 
         {"resolution": [1920, 1080]}    # 2 : video
     ],
-    "V2": [
+    "IMX219": [
         {"resolution": [640, 480]},
         {"resolution": [3280, 2464]},
         {"resolution": [1920, 1080]}
     ],
-    "V1": [
+    "OV5647": [
         {"resolution": [640, 480]},
         {"resolution": [2592, 1944]}, #, "framerate": Fraction(1, 15)},
         {"resolution": [1296, 972]}
@@ -88,9 +89,6 @@ CAMERA_SETTINGS = {
 MODE_PREVIEW    = 0
 MODE_STILL      = 1
 MODE_VIDEO      = 2
-
-FILTER_BOOMERANG    = "BOOMERANG"
-FILTER_FOCAL_SWITCH = "FOCAL_SWITCH"
 
 
 def global_except_hook(exctype, value, tb):
@@ -119,25 +117,36 @@ def global_except_hook(exctype, value, tb):
 
 def _change_camera_settings(cam, mode):
 
-    #self.camera.stop_preview()
+    camera_type = None
 
-    for key in CAMERA_SETTINGS.keys():
-        try:
-            # set to STILL resolution to check if it fails
-            cam.resolution = CAMERA_SETTINGS[key][MODE_STILL]["resolution"]
+    log.debug("change mode: {}".format(mode))
 
-            # set all settings to correct settings if the correct model is known
-            for setting in CAMERA_SETTINGS[key][mode]:
-                setattr(cam, setting, CAMERA_SETTINGS[key][mode][setting])
+    try:
+        key = str(cam.revision).upper()
+        for setting in CAMERA_SETTINGS[key][mode]:
+            setattr(cam, setting, CAMERA_SETTINGS[key][mode][setting])
 
-            log.debug("cam {} | camera settings applied: {}".format(cam, key))
-            
-            return key
-        except picamera.exc.PiCameraValueError as e:
-            print(e)
-            log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(cam, key))
+        camera_type = key
+        log.debug("cam {} | camera settings applied: {}".format(cam, key))
+    except picamera.exc.PiCameraValueError as e:
+        log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(cam, key))
 
-    #self.camera.start_preview()
+        for key in CAMERA_SETTINGS.keys():
+            try:
+                # set to STILL resolution to check if it fails
+                cam.resolution = CAMERA_SETTINGS[key][MODE_STILL]["resolution"]
+     
+                for setting in CAMERA_SETTINGS[key][mode]:
+                    setattr(cam, setting, CAMERA_SETTINGS[key][mode][setting])
+
+                camera_type = key
+                log.debug("cam {} | camera settings applied: {}".format(cam, key))
+
+                break
+            except picamera.exc.PiCameraValueError as e:
+                log.debug("cam {} | failing setting camera resolution for {}, attempting fallback".format(cam, key))
+         
+    return camera_type
 
 
 def _trigger(cam, filename):
@@ -168,6 +177,8 @@ def _trigger(cam, filename):
     img = img.reshape([res_rounded[1], res_rounded[0], 3])
     img = img[:res[0], :res[1], :]
 
+    # TODO: somewhere I am mixing up rows and cols, making the image square. Where?
+
     # scan for QR codes always on the out-of-camera image
     if SCAN_QR_CODES:
         qrcode = decode(img, symbols=[ZBarSymbol.QRCODE])
@@ -180,12 +191,31 @@ def _trigger(cam, filename):
 
     # self.save_image(filename, img)
 
+    print(img.shape)
+
     # TODO: write to file
     cv2.imwrite(os.path.join(*filename), img)
 
     log.info("TRIGGER: {}".format(filename[1]))
 
     _change_camera_settings(cam, MODE_PREVIEW)
+
+    return (filename, img)
+
+
+# captures data: [[filename0, img0], [filename1, img1]]
+def _apply_filter(filter_type, captures_data):
+    try:
+        if filter_type == filters.FILTER_BOOMERANG:
+            filename = os.path.join(captures_data[0][0][0], "filter_" + captures_data[0][0][1])
+            filters.apply_boomerang(
+                filename, 
+                [x[1] for x in captures_data]
+            )
+        else:
+            log.error("cannot apply filter, unknown filter type: {}".format(filter_type))
+    except Exception as e:
+        log.error("applying filter {} failed: {}".format(filter_type, e))
 
 
 class TLCam(object):
@@ -200,7 +230,7 @@ class TLCam(object):
         self.mode               = MODE_IDLE
         self.camera_type        = []
         self.camera             = [None, None]
-        self.active_filter      = None
+        self.active_filter      = DEFAULT_ACTIVE_FILTER
         self.timer_start        = None
         self.last_interaction   = datetime.datetime.now()
         self.controller         = None
@@ -209,16 +239,18 @@ class TLCam(object):
 
         self.init_pins()
 
-        kwargs = [
+        picamera_args = [
             {},
             {"led_pin": 30}
         ]
 
         for i in range(0, 2):
             try:
-                self.camera[i] = (picamera.PiCamera(sensor_mode=SENSOR_MODE, camera_num=i, **kwargs[i]))
+                self.camera[i] = (picamera.PiCamera(sensor_mode=SENSOR_MODE, camera_num=i, **picamera_args[i]))
                 self.camera[i].exif_tags["IFD0.Make"] = "TLP"
                 self.camera[i].exif_tags["IFD0.Model"] += "_TLP_{}".format(i)
+
+                log.debug("init camera {} // sensor: {}".format(i, self.camera[i].revision))
             except Exception as e:
                 log.debug("init camera {} failed: {}".format(i, e))
 
@@ -276,9 +308,15 @@ class TLCam(object):
             future_triggers.append(self.pool.submit(_trigger, cam, filename_new))
 
         # wait till all trigger threads are done
-
+        captures_data = []
         for f in future_triggers:
-            image_filename = f.result(timeout=TRIGGER_TIMEOUT)
+            captures_data.append(f.result(timeout=TRIGGER_TIMEOUT))
+
+        # apply filters?
+        future_filters = []
+        if self.active_filter is not None:
+            log.info("applying filter: {}".format(self.active_filter))
+            future_filters.append(self.pool.submit(_apply_filter, self.active_filter, captures_data))
 
         log.debug("trigger done")
 
@@ -319,23 +357,23 @@ class TLCam(object):
         if payload == QR_CODE_PREFIX+"RESET":
             self.filter_type = None
             return None
-        if payload == QR_CODE_PREFIX+FILTER_BOOMERANG:
-            self.filter_type = FILTER_BOOMERANG
-            return FILTER_BOOMERANG
+        if payload == QR_CODE_PREFIX+filters.FILTER_BOOMERANG:
+            self.filter_type = filters.FILTER_BOOMERANG
+            return filters.FILTER_BOOMERANG
         else:
             log.warning("compatible but unknown QR code recognized. Payload: {}".format(str))
             raise
 
 
-    def save_image(self, filename, img):
+    # def save_image(self, filename, img):
         
-        if self.filter_type is None:
-            cv2.imwrite(os.path.join(*filename), img)
-            log.debug("write image [filter: None] to: {}".format(filename[-1]))
-        if self.filter_type == FILTER_BOOMERANG:
-            filters.apply_boomerang(img)
-        else:
-            log.error("undefined filter type: {}".format(self.filter_type))
+    #     if self.filter_type is None:
+    #         cv2.imwrite(os.path.join(*filename), img)
+    #         log.debug("write image [filter: None] to: {}".format(filename[-1]))
+    #     if self.filter_type == filters.FILTER_BOOMERANG:
+    #         filters.apply_boomerang(img)
+    #     else:
+    #         log.error("undefined filter type: {}".format(self.filter_type))
 
 
     def convert_last_video_to_gif(self):
@@ -349,6 +387,8 @@ class TLCam(object):
 
             time.sleep(1.0)
             self.trigger()
+            time.sleep(1.0)
+            self.close()
             exit()
 
             if GPIO.input(PIN_BUTTON_SHUTTER) == 0:
