@@ -52,3 +52,13 @@ ssh $HOSTNAME 'sh /home/pi/tlp/buildroot_install.sh'
 
 echo "DONE! reboot..."
 ssh $HOSTNAME 'reboot'
+
+# TODO:
+
+# add to /boot/config.txt
+# resolution info (see fbcp.md)
+# disable_camera_led=1
+# gpu_mem=128
+# display_rotate=1 
+# start_x=1
+# disable_splash=1
