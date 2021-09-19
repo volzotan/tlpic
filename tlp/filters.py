@@ -4,10 +4,22 @@ import subprocess
 import cv2
 import numpy as np
 
+FILTER_RESET            = "RESET"
 FILTER_BOOMERANG        = "BOOMERANG"
 FILTER_FOCAL_SWITCH     = "FOCAL_SWITCH"
 
 TMP_DIR                 = "/tmp"
+
+def select_filter(payload):
+    if payload == filters.FILTER_RESET:
+        return FILTER_RESET
+    elif payload == filters.FILTER_BOOMERANG:
+        return filters.FILTER_BOOMERANG
+    elif payload == filters.FILTER_FOCAL_SWITCH:
+        return filters.FILTER_FOCAL_SWITCH
+    else:
+        return None
+
 
 def apply_boomerang(filename, images):
         

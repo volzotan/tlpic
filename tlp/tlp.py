@@ -16,8 +16,9 @@ import RPi.GPIO as GPIO
 import picamera
 import numpy as np
 import cv2
+from PIL import Image
 
-# from pyzbar.pyzbar import decode, ZBarSymbol
+from pyzbar.pyzbar import decode, ZBarSymbol
 
 from devices import CompressorCameraController
 import filters
@@ -32,6 +33,7 @@ PIN_LED2                = 13
 
 OUTPUT_DIR              = "/media/storage"
 OUTPUT_DIR_TMP          = "/home/pi/tmp"
+ASSET_DIR               = "assets"
 
 SERIAL_PORT             = "/dev/ttyAMA0"
 
@@ -40,7 +42,7 @@ CAPTURE_RAW             = False
 SENSOR_MODE             = 0 #3 #0
 EXPOSURE_COMPENSATION   = 0
 
-SCAN_QR_CODES           = False
+SCAN_QR_CODES           = True
 QR_CODE_PREFIX          = "TLP::"
 DEFAULT_ACTIVE_FILTER   = filters.FILTER_BOOMERANG
 
@@ -70,17 +72,17 @@ IDLE_TIME_MAX           = 600
 
 CAMERA_SETTINGS = {
     "IMX477": [
-        {"resolution": [640, 480]},     # 0 : preview
+        {"resolution": [320, 240]},     # 0 : preview
         {"resolution": [4056, 3040]},   # 1 : still 
         {"resolution": [1920, 1080]}    # 2 : video
     ],
     "IMX219": [
-        {"resolution": [640, 480]},
+        {"resolution": [320, 240]},
         {"resolution": [3280, 2464]},
         {"resolution": [1920, 1080]}
     ],
     "OV5647": [
-        {"resolution": [640, 480]},
+        {"resolution": [320, 240]},
         {"resolution": [2592, 1944]}, #, "framerate": Fraction(1, 15)},
         {"resolution": [1296, 972]}
     ]
@@ -190,10 +192,9 @@ def _trigger(cam, filename):
             # TODO: show message on display
 
     # self.save_image(filename, img)
+    # print(img.shape)
 
-    print(img.shape)
-
-    # TODO: write to file
+    # write to file
     cv2.imwrite(os.path.join(*filename), img)
 
     log.info("TRIGGER: {}".format(filename[1]))
@@ -320,6 +321,16 @@ class TLCam(object):
 
         log.debug("trigger done")
 
+        # TODO:
+
+        img = Image.open(os.path.join(ASSET_DIR, "overlay_filter.png"))
+        b = img.tobytes()
+        o = self.camera[0].add_overlay(b, layer=3, alpha=128)        
+        # o = camera.add_overlay(pad.tostring(), size=img.size)
+        # o = camera.add_overlay(np.getbuffer(a), layer=3, alpha=64)
+
+        time.sleep(1)
+
 
     def start_recording(self):
 
@@ -354,12 +365,11 @@ class TLCam(object):
             log.warning("incompatible QR code recognized. Payload: {}".format(str))
             raise Exception("incompatible QR")
 
-        if payload == QR_CODE_PREFIX+"RESET":
-            self.filter_type = None
-            return None
-        if payload == QR_CODE_PREFIX+filters.FILTER_BOOMERANG:
-            self.filter_type = filters.FILTER_BOOMERANG
-            return filters.FILTER_BOOMERANG
+        ret = filters.configure_filter(payload[len(QR_CODE_PREFIX):])
+
+        if ret is not None:
+            log.info("configured filter {}".format(ret))
+            self.filter_type = ret
         else:
             log.warning("compatible but unknown QR code recognized. Payload: {}".format(str))
             raise
@@ -403,6 +413,15 @@ class TLCam(object):
                 # long press: video
                 if GPIO.input(PIN_BUTTON_SHUTTER) == 0:
                     self.start_recording()
+
+
+            if GPIO.input(PIN_BUTTON_CAM0) == 0:
+                self.last_interaction = datetime.datetime.now()
+
+
+            if GPIO.input(PIN_BUTTON_CAM1) == 0:
+                self.last_interaction = datetime.datetime.now()
+
 
             if (datetime.datetime.now() - self.last_interaction).total_seconds() > IDLE_TIME_MAX:
                     
