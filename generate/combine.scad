@@ -1,21 +1,21 @@
 union() {
-    intersection() {
+    difference(){
+        
         rotate([-90, 0, 0]) 
-        translate([0, -10, 0])
-        //import("SLP3_intersect.stl");
-        union() {
-            import("Frontplate.stl");
-            import("SLP3_combine.stl");
-        };
-
+            translate([0, -10, 0])
+                import("Frontplate.stl");
+        
+        rotate([-90, 0, 0]) 
+            translate([0, -10, 0])
+                import("SLP_allowed.stl"); 
+    }
+    intersection(){
+        
         translate([0, 0, 10]) 
-        import("p.stl");
-    };
-    intersection() {
+            import("p.stl");
+        
         rotate([-90, 0, 0]) 
-        translate([0, -10, 0])
-        import("SLP3_combine.stl"); 
-        translate([0, 0, 0.1])cube([60, 110, 10]);
-    };
+            translate([0, -10, 0])
+                import("SLP_allowed.stl"); 
+    }
 }
-

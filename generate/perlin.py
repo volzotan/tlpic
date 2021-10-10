@@ -1,10 +1,10 @@
 from PIL import Image, ImageOps, ImageFilter
 import numpy as np
 import matplotlib.pyplot as plt
-import pyvista as pv
 
 DIMENSIONS      = [60, 110]
 PERLIN_PER_UNIT = 0.09
+PERLIN_PER_UNIT = 0.2
 SAMPLING_RATE   = 10 # per unit
 Z_HEIGHT        = 10
 
@@ -79,27 +79,20 @@ x, y = np.meshgrid(linx, liny)
 
 res = perlin(x, y, seed=2)
 
+# cut off the hills, keep the valleys
 res[res[:,:] > 0] = 0 
 
-# res = res + np.sqrt(2)
-# res = np.add(res, np.abs(np.min(res)))
+plt.imsave("test.png", res, origin='upper')
+
+# exit()
 
 with open("p.xyz", "w") as f:
     grid = pv.StructuredGrid(x, y, res)
     for p in grid.points:
         f.write("{} {} {}\n".format(p[0]/PERLIN_PER_UNIT, p[1]/PERLIN_PER_UNIT, p[2]*Z_HEIGHT))
 
-    # add additional points
-    # for px in linx:
-    #     for py in liny:
-    #         f.write("{} {} {}\n".format(px/PERLIN_PER_UNIT, py/PERLIN_PER_UNIT, Z_HEIGHT*3))
-
-    # for e in res[,:]
-    # lin = np.linspace(0, DIMENSIONS[1]*PERLIN_PER_UNIT, DIMENSIONS[1]*SAMPLING_RATE, endpoint=False)
-
-    # for i in range(0, 10):
-    #     for p in grid.points:
-    #         f.write("{} {} {}\n".format(p[0]/PERLIN_PER_UNIT, p[1]/PERLIN_PER_UNIT, p[2]-1.0*i))
+    ## additional points
+    # side L/R
 
     for i in range(0, DIMENSIONS[1]*SAMPLING_RATE):
         for j in [0, DIMENSIONS[0]*SAMPLING_RATE-1]:
@@ -107,19 +100,21 @@ with open("p.xyz", "w") as f:
             for z in zs:
                 f.write("{} {} {}\n".format(j/SAMPLING_RATE, i/SAMPLING_RATE, z))
 
+    # side T/B
+
     for i in [0, DIMENSIONS[1]*SAMPLING_RATE-1]:
         for j in range(0, DIMENSIONS[0]*SAMPLING_RATE):
             zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*Z_HEIGHT, BLOCK_HEIGHT*SAMPLING_RATE, endpoint=False)
             for z in zs:
                 f.write("{} {} {}\n".format(j/SAMPLING_RATE, i/SAMPLING_RATE, z))
 
+    # bottom plane
+
     for j in linx[1:]:
         for i in liny[1:]:
             f.write("{} {} {}\n".format(j/PERLIN_PER_UNIT, i/PERLIN_PER_UNIT, -BLOCK_HEIGHT))
 
 exit()
-
-plt.imsave("test.png", res, origin='upper')
 
 with Image.open("overlay.png") as im:
     im = im.resize([res.shape[1], res.shape[0]])
@@ -132,36 +127,15 @@ with Image.open("overlay.png") as im:
     result = Image.fromarray((base * 255).astype(np.uint8))
     result.save("out.png")
 
-exit()
+# grid = pv.StructuredGrid(x, y, res)
+# # grid.plot(show_edges=True)
 
-grid = pv.StructuredGrid(x, y, res)
-# grid.plot(show_edges=True)
+# top = grid.points.copy()
+# bottom = grid.points.copy()
+# bottom[:,-1] = -1.0 
 
-top = grid.points.copy()
-bottom = grid.points.copy()
-bottom[:,-1] = -1.0 
+# vol = pv.StructuredGrid()
+# vol.points = np.vstack((top, bottom))
+# vol.dimensions = [*grid.dimensions[0:2], 2]
+# vol.plot() #show_edges=True)
 
-vol = pv.StructuredGrid()
-vol.points = np.vstack((top, bottom))
-vol.dimensions = [*grid.dimensions[0:2], 2]
-vol.plot() #show_edges=True)
-
-# surf = pv.wrap(vol.points).reconstruct_surface()
-
-# pl = pv.Plotter(shape=(1,2))
-# pl.add_mesh(vol.points)
-# pl.add_title('Point Cloud of 3D Surface')
-# pl.subplot(0,1)
-# pl.add_mesh(surf, color=True, show_edges=True)
-# pl.add_title('Reconstructed Surface')
-# pl.show()
-
-# vol.save("mesh.vtk")
-# vol.save("mesh.stl")
-
-# contours = vol.contour()
-
-# p = pv.Plotter()
-# p.add_mesh(vol, opacity=0.85)
-# p.add_mesh(contours, color="white", line_width=5)
-# p.show()
