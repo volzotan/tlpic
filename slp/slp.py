@@ -16,7 +16,10 @@ from devices import CompressorCameraController
 
 # import numpy as np
 
-BUTTON_SHUTTER          = 23 # BCM numbering
+# BCM numbering
+BUTTON_SHUTTER          = 27
+PIN_LED                 = 22 
+
 OUTPUT_DIR              = "/media/storage"
 OUTPUT_DIR_TMP          = "/home/pi/tmp"
 
@@ -30,7 +33,9 @@ EXPOSURE_COMPENSATION   = 0
 # all units in seconds
 RECORDING_TIME_MAX      = 10
 MOUNTING_TIME_MAX       = 10
-IDLE_TIME_MAX           = 60
+
+IDLE_TIME_MAX           = 180
+# IDLE_TIME_MAX           = None
 
 # consts
 MODE_IDLE   = 0
@@ -121,14 +126,12 @@ class Cam(object):
         self.timer_start        = None
         self.last_interaction   = datetime.datetime.now()
 
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(BUTTON_SHUTTER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
         self.camera = picamera.PiCamera(sensor_mode=SENSOR_MODE) 
 
         self.camera.meter_mode = "average"
         self.camera.exposure_compensation = EXPOSURE_COMPENSATION
-        # camera.iso = 400
+
+        # self.camera.rotation = 90
 
         for key in CAMERA_SETTINGS.keys():
             try:
@@ -146,7 +149,7 @@ class Cam(object):
             except picamera.exc.PiCameraValueError as e:
                 log.debug("failing setting camera resolution for {}, attempting fallback".format(key))
 
-        self.camera.start_preview()
+        self.camera.start_preview(rotation=270)
 
         log.info("camera ready")
 
@@ -211,32 +214,27 @@ class Cam(object):
         self.convert_last_video_to_gif()
 
 
-    def convert_last_video_to_gif(self):
-        # ffmpeg package for buildroot?
-        pass
-
-
     def loop(self):
 
         if self.mode == MODE_IDLE:
 
-            if GPIO.input(BUTTON_SHUTTER) == 0:
+            if GPIO.input(BUTTON_SHUTTER) == 1:
                 time.sleep(0.5)
 
                 self.last_interaction = datetime.datetime.now()
 
                 # single press: photo
-                if GPIO.input(BUTTON_SHUTTER) == 1:
+                if GPIO.input(BUTTON_SHUTTER) == 0:
                     self.trigger()
                 
                 # long press: video
-                if GPIO.input(BUTTON_SHUTTER) == 0:
+                if GPIO.input(BUTTON_SHUTTER) == 1:
                     self.start_recording()
 
             if (datetime.datetime.now() - self.last_interaction).total_seconds() > MOUNTING_TIME_MAX:
                 unmount()
 
-            if (datetime.datetime.now() - self.last_interaction).total_seconds() > IDLE_TIME_MAX:
+            if IDLE_TIME_MAX is not None and (datetime.datetime.now() - self.last_interaction).total_seconds() > IDLE_TIME_MAX:
                     
                 if self.controller is not None:
                     try:
@@ -265,7 +263,7 @@ class Cam(object):
                 self.stop_recording()
                 self.mode = MODE_IDLE
 
-            if GPIO.input(BUTTON_SHUTTER) == 1:
+            if GPIO.input(BUTTON_SHUTTER) == 0:
                 self.stop_recording()
                 self.mode = MODE_IDLE
 
@@ -350,6 +348,20 @@ if __name__ == "__main__":
     sys.excepthook = global_except_hook
 
     # subprocess.run("mount -t tmpfs -o size=100m tmpfs {}".format(OUTPUT_DIR_TMP), shell=True, check=True)
+
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(BUTTON_SHUTTER, GPIO.IN)
+    GPIO.setup(PIN_LED, GPIO.OUT)
+
+    for i in range(0, 3):
+        GPIO.output(PIN_LED, 1)
+        time.sleep(0.5)
+        GPIO.output(PIN_LED, 0)
+        time.sleep(0.5)
+
+    GPIO.output(PIN_LED, 1)
+
+    time.sleep(1.0)
 
     cam = None
     cam = Cam()

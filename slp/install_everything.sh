@@ -8,6 +8,7 @@ ssh $HOSTNAME 'mount -o remount,rw /dev/root /'
 # ------------------------------------------
 
 ssh $HOSTNAME 'rm /etc/init.d/S34compressorcam'
+ssh $HOSTNAME 'rm -rf /home/pi/ccam'
 ssh $HOSTNAME 'mkdir /home/pi/tmp'
 
 echo "DONE"
