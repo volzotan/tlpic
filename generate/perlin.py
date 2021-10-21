@@ -1,6 +1,7 @@
 from PIL import Image, ImageOps, ImageFilter
 import numpy as np
 import matplotlib.pyplot as plt
+import pyvista as pv
 
 DIMENSIONS      = [60, 110]
 PERLIN_PER_UNIT = 0.09

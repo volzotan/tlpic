@@ -18,7 +18,7 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from pyzbar.pyzbar import decode, ZBarSymbol
+# from pyzbar.pyzbar import decode, ZBarSymbol
 
 from devices import CompressorCameraController
 import filters
@@ -42,13 +42,13 @@ CAPTURE_RAW             = False
 SENSOR_MODE             = 0 #3 #0
 EXPOSURE_COMPENSATION   = 0
 
-SCAN_QR_CODES           = True
+SCAN_QR_CODES           = False
 QR_CODE_PREFIX          = "TLP::"
 DEFAULT_ACTIVE_FILTER   = filters.FILTER_BOOMERANG
 
 # all units in seconds
 RECORDING_TIME_MAX      = 10
-IDLE_TIME_MAX           = 120 
+IDLE_TIME_MAX           = 300 
 TRIGGER_TIMEOUT         = 10
 
 # consts
