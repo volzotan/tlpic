@@ -1,15 +1,18 @@
 import math
 import argparse
+import textwrap
 
 from PIL import Image, ImageOps, ImageFilter
 import numpy as np
 import matplotlib.pyplot as plt
+from stl import mesh
+
+import colormap
 
 PERLIN_PER_UNIT = 0.2
 SAMPLING_RATE   = 10 # per unit
 Z_HEIGHT        = 10
 
-BLOCK_HEIGHT    = Z_HEIGHT*2
 OUTPUT_FILENAME = "out.png"
 
 def perlin(x, y, seed=0):
@@ -76,6 +79,10 @@ def gradient(h,x,y):
     return g[:, :, 0] * x + g[:, :, 1] * y
 
 
+def coord_to_ind(x, y, dim, sampling):
+    return y * dim[0]*sampling + x
+
+
 ap = argparse.ArgumentParser(description="Generate Perlin Noise")
 ap.add_argument("-x",    type=int, default=100, help="width")
 ap.add_argument("-y",    type=int, default=100, help="depth")
@@ -85,19 +92,23 @@ ap.add_argument("-s", "--sampling-rate", type=int, default=SAMPLING_RATE, help="
 ap.add_argument("--output-image", default=None, help="output image filename")
 ap.add_argument("--output-xyz", default=None, help="output pointcloud filename")
 ap.add_argument("--output-stl", default=None, help="output STL filename")
+ap.add_argument("--output-ply", default=None, help="output PLY filename")
 ap.add_argument("--cutoff", action="store_true", default=False, help="cut off positive values")
 ap.add_argument("--surface-only", action="store_true", default=False, help="for point cloud coordinates do not extrude the volume")
     
 args = vars(ap.parse_args())
 
-DIMENSIONS = [args["x"], args["y"]]
+DIMENSIONS      = [args["x"], args["y"]]
+BLOCK_HEIGHT    = args["z"]*2
 
 linx = np.linspace(0, DIMENSIONS[0]*args["ppu"], DIMENSIONS[0]*args["sampling_rate"], endpoint=False)
 liny = np.linspace(0, DIMENSIONS[1]*args["ppu"], DIMENSIONS[1]*args["sampling_rate"], endpoint=False)
 x, y = np.meshgrid(linx, liny)
 
 res = perlin(x, y, seed=2)
-res = np.multiply(res, Z_HEIGHT)
+res_min = np.min(res)
+res_max = np.max(res)
+res = np.multiply(res, args["z"])
 
 # cut off the hills, keep the valleys
 if args["cutoff"]:
@@ -112,34 +123,142 @@ if args["output_image"]:
         origin="upper"
     )
 
+if args["output_ply"]:
+
+    s = args["sampling_rate"]
+    num_vertices = (DIMENSIONS[0]*s) * (DIMENSIONS[1]*s)
+    num_faces = (DIMENSIONS[0]*s-1) * (DIMENSIONS[1]*s-1) * 2
+
+    with open(args["output_ply"], "w") as f:
+        data =  """
+                ply
+                format ascii 1.0
+                element vertex {}
+                property float x
+                property float y
+                property float z
+                property uchar red
+                property uchar green
+                property uchar blue
+                element face {}
+                property list uchar int vertex_indices
+                end_header
+                """
+
+        data = textwrap.dedent(data[1:]) # remove first newline (for dedent to work)        
+        data = data.format(num_vertices, num_faces)
+
+        vertices = []
+        faces = []
+
+        f.write(data)
+
+        for y in range(0, DIMENSIONS[1]*s):
+            for x in range(0, DIMENSIONS[0]*s):
+
+                pos = (res[y, x]/args["z"] - res_min)/(res_max-res_min)
+                c = colormap._viridis_data[int(pos*(len(colormap._viridis_data)-1))]
+                c = [int(x*255) for x in c]
+
+                f.write("{:.3f} {:.3f} {:.3f} {:d} {:d} {:d}\n".format(x/s, y/s, res[y,x], *c))
+
+        for y in range(0, DIMENSIONS[1]*s-1):
+            for x in range(0, DIMENSIONS[0]*s-1):
+
+                f.write("3 {} {} {}\n".format(
+                    coord_to_ind(x,     y,      DIMENSIONS, s),
+                    coord_to_ind(x+1,   y,      DIMENSIONS, s),
+                    coord_to_ind(x,     y+1,    DIMENSIONS, s),
+                ))
+                
+                f.write("3 {} {} {}\n".format(
+                    coord_to_ind(x+1,   y,      DIMENSIONS, s),
+                    coord_to_ind(x+1,   y+1,    DIMENSIONS, s),
+                    coord_to_ind(x,     y+1,    DIMENSIONS, s),
+                ))
+
+        f.write("\n")
+        
+
 if args["output_stl"]:
 
-    from stl import mesh
+    s = args["sampling_rate"]
 
-    faces = np.zeros([
-        (DIMENSIONS[0]*args["sampling_rate"]-1)*(DIMENSIONS[1]*args["sampling_rate"]-1),
-        3
-    ])
-
-    num_faces = (DIMENSIONS[0]*args["sampling_rate"]-1)*(DIMENSIONS[1]*args["sampling_rate"]-1) * 2
+    num_faces = ((DIMENSIONS[0]*s-1) *
+                (DIMENSIONS[1]*s-1) * 4 +
+                (DIMENSIONS[0]*s) * 4 +
+                (DIMENSIONS[1]*s) * 4)
 
     obj = mesh.Mesh(np.zeros(num_faces, dtype=mesh.Mesh.dtype))
     count = 0
 
-    for x in range(0, DIMENSIONS[0]*args["sampling_rate"]-1):
-        for y in range(0, DIMENSIONS[1]*args["sampling_rate"]-1):
+    for x in range(0, DIMENSIONS[0]*s-1):
+        for y in range(0, DIMENSIONS[1]*s-1):
             
-            obj.vectors[count][0] = [x/args["sampling_rate"], y/args["sampling_rate"], res[y,x]]
-            obj.vectors[count][1] = [(x+1)/args["sampling_rate"], y/args["sampling_rate"], res[y,x+1]]
-            obj.vectors[count][2] = [x/args["sampling_rate"], (y+1)/args["sampling_rate"], res[y+1,x]]
+            obj.vectors[count][0] = [x/s, y/s, res[y,x]]
+            obj.vectors[count][1] = [(x+1)/s, y/s, res[y,x+1]]
+            obj.vectors[count][2] = [x/s, (y+1)/s, res[y+1,x]]
 
             count += 1
 
-            obj.vectors[count][0] = [(x+1)/args["sampling_rate"], y/args["sampling_rate"], res[y,x+1]]
-            obj.vectors[count][1] = [(x+1)/args["sampling_rate"], (y+1)/args["sampling_rate"], res[y+1,x+1]]
-            obj.vectors[count][2] = [x/args["sampling_rate"], (y+1)/args["sampling_rate"], res[y+1,x]]
+            obj.vectors[count][0] = [(x+1)/s, y/s, res[y,x+1]]
+            obj.vectors[count][1] = [(x+1)/s, (y+1)/s, res[y+1,x+1]]
+            obj.vectors[count][2] = [x/s, (y+1)/s, res[y+1,x]]
 
             count += 1
+
+    if not args["surface_only"]:
+
+        # side T/B
+
+        for y in [0, DIMENSIONS[1]*s-1]:
+            for x in range(0, DIMENSIONS[0]*s-1):
+                    
+                obj.vectors[count][0] = [x/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [(x+1)/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][2] = [x/s, y/s, res[y,x]]
+
+                count += 1
+
+                obj.vectors[count][0] = [(x+1)/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [(x+1)/s, y/s, res[y,x+1]]
+                obj.vectors[count][2] = [x/s, y/s, res[y,x]]
+
+                count += 1
+
+        # side L/R
+
+        for x in [0, DIMENSIONS[0]*s-1]:
+            for y in range(0, DIMENSIONS[0]*s-1):
+
+                obj.vectors[count][0] = [x/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [x/s, (y+1)/s, -BLOCK_HEIGHT]
+                obj.vectors[count][2] = [x/s, y/s, res[y,x]]
+
+                count += 1
+
+                obj.vectors[count][0] = [x/s, (y+1)/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [x/s, (y+1)/s, res[y+1,x]]
+                obj.vectors[count][2] = [x/s, y/s, res[y,x]]
+
+                count += 1
+
+        # bottom
+
+        for x in range(0, DIMENSIONS[0]*s-1):
+            for y in range(0, DIMENSIONS[1]*s-1):
+                
+                obj.vectors[count][0] = [x/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [(x+1)/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][2] = [x/s, (y+1)/s, -BLOCK_HEIGHT]
+
+                count += 1
+
+                obj.vectors[count][0] = [(x+1)/s, y/s, -BLOCK_HEIGHT]
+                obj.vectors[count][1] = [(x+1)/s, (y+1)/s, -BLOCK_HEIGHT]
+                obj.vectors[count][2] = [x/s, (y+1)/s, -BLOCK_HEIGHT]
+
+                count += 1
 
     obj.save(args["output_stl"])
 
@@ -159,7 +278,7 @@ if args["output_xyz"]:
 
             for i in range(0, DIMENSIONS[1]*args["sampling_rate"]):
                 for j in [0, DIMENSIONS[0]*args["sampling_rate"]-1]:
-                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*Z_HEIGHT, BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
+                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
                     for z in zs:
                         f.write("{} {} {}\n".format(j/args["sampling_rate"], i/args["sampling_rate"], z))
 
@@ -167,7 +286,7 @@ if args["output_xyz"]:
 
             for i in [0, DIMENSIONS[1]*args["sampling_rate"]-1]:
                 for j in range(0, DIMENSIONS[0]*args["sampling_rate"]):
-                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*Z_HEIGHT, BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
+                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
                     for z in zs:
                         f.write("{} {} {}\n".format(j/args["sampling_rate"], i/args["sampling_rate"], z))
 
