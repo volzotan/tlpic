@@ -278,7 +278,7 @@ if args["output_xyz"]:
 
             for i in range(0, DIMENSIONS[1]*args["sampling_rate"]):
                 for j in [0, DIMENSIONS[0]*args["sampling_rate"]-1]:
-                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
+                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], int(BLOCK_HEIGHT*args["sampling_rate"]), endpoint=False)
                     for z in zs:
                         f.write("{} {} {}\n".format(j/args["sampling_rate"], i/args["sampling_rate"], z))
 
@@ -286,7 +286,7 @@ if args["output_xyz"]:
 
             for i in [0, DIMENSIONS[1]*args["sampling_rate"]-1]:
                 for j in range(0, DIMENSIONS[0]*args["sampling_rate"]):
-                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], BLOCK_HEIGHT*args["sampling_rate"], endpoint=False)
+                    zs = np.linspace(-BLOCK_HEIGHT, res[i, j]*args["z"], int(BLOCK_HEIGHT*args["sampling_rate"]), endpoint=False)
                     for z in zs:
                         f.write("{} {} {}\n".format(j/args["sampling_rate"], i/args["sampling_rate"], z))
 
