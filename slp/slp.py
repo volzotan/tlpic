@@ -211,7 +211,7 @@ class Cam(object):
 
         self.change_camera_settings(0)
 
-        self.convert_last_video_to_gif()
+        # self.convert_last_video_to_gif()
 
 
     def loop(self):
